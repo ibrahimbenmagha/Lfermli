@@ -1,15 +1,31 @@
-import React, { useState } from 'react';
+import { useState, ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Heart, User, Settings } from 'lucide-react';
+import { Heart, User, Settings, LucideIcon } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { message } from 'antd';
 import axiosInstance from '../axiosConfig';
+import { AxiosError } from 'axios';
 
-const LoginForm = ({ userType, title, icon: Icon, formData, handleInputChange, handleLogin, loading }) => (
+interface FormData {
+  email: string;
+  password: string;
+}
+
+interface LoginFormProps {
+  userType: string;
+  title: string;
+  icon: LucideIcon;
+  formData: FormData;
+  handleInputChange: (e: ChangeEvent<HTMLInputElement>) => void;
+  handleLogin: (userType: string) => void;
+  loading: boolean;
+}
+
+const LoginForm = ({ userType, title, icon: Icon, formData, handleInputChange, handleLogin, loading }: LoginFormProps) => (
   <Card className="w-full max-w-md mx-auto">
     <CardHeader className="text-center">
       <div className="w-16 h-16 bg-gradient-medical rounded-full flex items-center justify-center mx-auto mb-4">
@@ -66,20 +82,20 @@ const LoginForm = ({ userType, title, icon: Icon, formData, handleInputChange, h
 
 const Login = () => {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormData>({
     email: '',
     password: '',
   });
   const [loading, setLoading] = useState(false);
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value,
     });
   };
 
-  const handleLogin = async (userType) => {
+  const handleLogin = async (userType: string) => {
     setLoading(true);
     try {
       // Déterminer l'endpoint en fonction du userType
@@ -104,7 +120,8 @@ const Login = () => {
           message.error('Rôle utilisateur non reconnu');
       }
     } catch (error) {
-      const errorMessage = error.response?.data?.error || 'Une erreur s\'est produite lors de la connexion';
+      const axiosError = error as AxiosError<{ error?: string }>;
+      const errorMessage = axiosError.response?.data?.error || 'Une erreur s\'est produite lors de la connexion';
       message.error(errorMessage);
     } finally {
       setLoading(false);

@@ -8,6 +8,8 @@ use App\Http\Controllers\PatientController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\ServiceController;
 use App\Http\Controllers\AppointAppointmentController;
+use App\Http\Controllers\ReviewController;
+use App\Http\Controllers\MedicalRecordController;
 
 
 
@@ -35,6 +37,18 @@ Route::prefix('auth')->group(function () {
     Route::get('GetAllServices', [ServiceController::class, 'GetAllServices']);
     Route::get('GetAllCities', [ServiceController::class, 'GetAllCities']);
     Route::get('GetAllZones', [ServiceController::class, 'GetAllZones']);
+
+    // Nurse filtering by location
+    Route::get('getNursesByCity', [NursesController::class, 'getNursesByCity']);
+    Route::get('getNursesByZone', [NursesController::class, 'getNursesByZone']);
+    Route::get('getNursesByServiceAndZone', [NursesController::class, 'getNursesByServiceAndZone']);
+
+    // Availability routes
+    Route::get('availability/slots', [AvailabilityController::class, 'getAvailableSlots']);
+
+    // Public reviews
+    Route::get('getReviewsByNurse/{nurseId}', [ReviewController::class, 'getReviewsByNurse']);
+    Route::get('getNurseAverageRating/{nurseId}', [ReviewController::class, 'getNurseAverageRating']);
 
 
 });
@@ -66,15 +80,24 @@ Route::middleware(["check.role:admin"])->group(function () {
 
 Route::middleware(["check.role:nurse"])->group(function () {
     Route::get('getNurseAppointments', [AppointAppointmentController::class, 'getNurseAppointments']);
+    Route::post('nurse/availability/weekly', [AvailabilityController::class, 'setWeeklySchedule']);
+    Route::post('nurse/availability/specific', [AvailabilityController::class, 'setSpecificAvailability']);
+    Route::get('sos/alerts', [SOSController::class, 'getActiveAlerts']);
     Route::get('getNurseAppointmentsTermine', [AppointAppointmentController::class, 'getNurseAppointmentsTermine']);
-    Route::get('updateStatusToConfirmed', [AppointAppointmentController::class, 'updateStatusToConfirmed']);
-    Route::get('updateStatusToTermine', [AppointAppointmentController::class, 'updateStatusToTermine']);
-    Route::get('updateStatusToRefuse', [AppointAppointmentController::class, 'updateStatusToRefuse']);
-    Route::get('updateStatusToAnnule', [AppointAppointmentController::class, 'updateStatusToAnnule']);
+    Route::put('updateStatusToConfirmed', [AppointAppointmentController::class, 'updateStatusToConfirmed']);
+    Route::put('updateStatusToTermine', [AppointAppointmentController::class, 'updateStatusToTermine']);
+    Route::put('updateStatusToRefuse', [AppointAppointmentController::class, 'updateStatusToRefuse']);
+    Route::put('updateStatusToAnnule', [AppointAppointmentController::class, 'updateStatusToAnnule']);
 
     Route::get('getNurseStats', [NursesController::class, 'getNurseStats']);
     Route::get('GetNurseInfosById', [NursesController::class, 'GetNurseInfosById']);
 
+    // Medical Records - Nurse
+    Route::post('createMedicalRecord', [MedicalRecordController::class, 'createMedicalRecord']);
+    Route::get('getMedicalRecordByAppointment/{id}', [MedicalRecordController::class, 'getMedicalRecordByAppointment']);
+    
+    // Payments & Invoices - Nurse
+    Route::post('appointment/{id}/mark-as-paid', [\App\Http\Controllers\PaymentController::class, 'markAsPaid']);
 });
 
 
@@ -82,14 +105,28 @@ Route::middleware(["check.role:nurse"])->group(function () {
 Route::middleware(["check.role:patient"])->group(function () {
 
     Route::post('createAppointment', [AppointAppointmentController::class, 'createAppointment']);
-    Route::get('getPatientAppointments', [AppointAppointmentController::class, 'getPatientAppointmentsNotDone']);
+    Route::get('getPatientAppointmentsActive', [AppointAppointmentController::class, 'getPatientAppointmentsNotDone']);
     Route::get('getPatientAppointmentsTermine', [AppointAppointmentController::class, 'getPatientAppointmentsTermine']);
-    Route::get('getPatientAppointments', [AppointAppointmentController::class, 'getPatientAppointments']);
+    Route::get('getPatientAppointmentsAll', [AppointAppointmentController::class, 'getPatientAppointments']);
     Route::get('getPatientById', [PatientController::class, 'getPatientById']);
 
-    //
+    // Patient appointment management
+    Route::put('cancelAppointmentByPatient', [AppointAppointmentController::class, 'cancelAppointmentByPatient']);
+    Route::put('updateAppointmentByPatient', [AppointAppointmentController::class, 'updateAppointmentByPatient']);
 
+    // Reviews - Patient
+    Route::post('createReview', [ReviewController::class, 'createReview']);
+    Route::get('getMyReviews', [ReviewController::class, 'getReviewsByPatient']);
 
+    // Medical Records - Patient
+    Route::get('getMyMedicalHistory', [MedicalRecordController::class, 'getPatientMedicalHistory']);
+    
+    // Payments & Invoices - Patient
+    Route::post('appointment/{id}/payment-method', [\App\Http\Controllers\PaymentController::class, 'setPaymentMethod']);
+    Route::post('appointment/{id}/create-payment-intent', [\App\Http\Controllers\PaymentController::class, 'createPaymentIntent']);
+    Route::post('sos/trigger', [SOSController::class, 'triggerSOS']);
+    Route::post('stripe-webhook', [\App\Http\Controllers\PaymentController::class, 'confirmStripePayment']); // Ideally public for actual Webhooks
+    Route::get('invoice/{id}/download', [\App\Http\Controllers\InvoiceController::class, 'downloadInvoice']);
 });
 
 

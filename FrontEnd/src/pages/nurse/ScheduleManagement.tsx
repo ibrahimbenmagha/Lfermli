@@ -20,6 +20,8 @@ interface Appointment {
   adress: string;
   statut: string;
   emergency_level: string;
+  payment_status: string;
+  payment_method: string;
 }
 
 const ScheduleManagement: React.FC = () => {
@@ -175,6 +177,28 @@ const ScheduleManagement: React.FC = () => {
     }
   };
 
+  // Mark as paid
+  const handleMarkAsPaid = async (apptId: number) => {
+    try {
+      const response = await axiosInstance.post(`appointment/${apptId}/mark-as-paid`);
+      setAppointments((prev) =>
+        prev.map((appt) =>
+          appt.id === apptId ? { ...appt, payment_status: 'paid' } : appt
+        )
+      );
+      toast({
+        title: 'Succès',
+        description: response.data.message || 'Paiement confirmé et facture générée.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Erreur',
+        description: 'Impossible de confirmer le paiement.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // Placeholder for messages button
   const handleMessages = () => {
     toast({
@@ -300,6 +324,16 @@ const ScheduleManagement: React.FC = () => {
                                     Terminer
                                   </Button>
                                 </>
+                              )}
+                              {appt.statut === 'confirme' && appt.payment_status !== 'paid' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="mt-4 border-blue-500 text-blue-600 hover:bg-blue-50"
+                                  onClick={() => handleMarkAsPaid(appt.id)}
+                                >
+                                  Payer (Cash)
+                                </Button>
                               )}
                             </div>
                           </div>

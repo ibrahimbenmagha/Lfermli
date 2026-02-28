@@ -1,9 +1,7 @@
-import App from '@/App';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { MapPin, Clock, Star, Calendar, Plus } from 'lucide-react';
-// import NursesList from "./pages/NursesList";
 
 interface Nurse {
   id: number;

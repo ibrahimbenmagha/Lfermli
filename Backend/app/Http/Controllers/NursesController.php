@@ -3,242 +3,206 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use App\Models\City;
 use App\Models\Zone;
 use App\Models\Service;
 use App\Models\Nurse;
 use App\Models\User;
-use App\Models\NurseService;
+use App\Models\Patient;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use App\Helpers\JwtHelper;
 use Carbon\Carbon;
 use App\Models\Appointment;
-use Illuminate\Http\JsonResponse;
 
+/**
+ * NursesController
+ * 
+ * Handles nurse-related operations including creation, retrieval,
+ * filtering, statistics, and status management.
+ */
 class NursesController extends Controller
 {
+    // User role constant
+    private const ROLE_NURSE = 'nurse';
 
+    // Nurse status constants
+    private const STATUS_ACTIVATED = 'activated';
+    private const STATUS_DISABLED = 'disabled';
 
-    public function CreateNurse(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email',
-            'nickname' => 'required|string|unique:users,nickname',
-            'password' => 'required|string|min:6',
-            'phone_number' => 'required|string|max:20|unique:users,phone_number', // Validation ajoutée
-            'city_name' => 'required|string',
-            'zone_name' => 'required|string',
-            'services' => 'required|array|min:1|max:3',
-            'services.*.name' => 'required|string|exists:services,name',
-            'services.*.price' => 'required|numeric|min:0',
-            'status'=>'string'
-        ]);
+    // Appointment status constants
+    private const APPOINTMENT_STATUS_CANCELLED = 'annule';
+    private const APPOINTMENT_STATUS_COMPLETED = 'termine';
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
+    // Statistics time period
+    private const STATS_DAYS_PERIOD = 7;
 
-        $city = City::where('name', $request->city_name)->first();
-        if (!$city) {
-            return response()->json(['message' => 'Ville introuvable.'], 404);
-        }
+    // Service limits
+    private const MIN_SERVICES = 1;
+    private const MAX_SERVICES = 3;
 
-        $zone = Zone::where('name', $request->zone_name)
-            ->where('city_id', $city->id)
-            ->first();
-        if (!$zone) {
-            return response()->json(['message' => 'La zone sélectionnée ne correspond pas à la ville choisie.'], 400);
-        }
-
-        // Création de l'utilisateur avec numéro de téléphone
-        $user = User::create([
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'nickname' => $request->nickname,
-            'email' => $request->email,
-            'phone_number' => $request->phone_number, // Ajout ici
-            'password' => Hash::make($request->password),
-            'role' => 'nurse',
-        ]);
-
-        $nurse = Nurse::create([
-            'user_id' => $user->id,
-            'city_id' => $city->id,
-            'zone_id' => $zone->id,
-        ]);
-
-        foreach ($request->services as $serviceData) {
-            $service = Service::where('name', $serviceData['name'])->first();
-            if ($service) {
-                DB::table('nurse_service')->insert([
-                    'nurse_id' => $nurse->id,
-                    'service_id' => $service->id,
-                    'price' => $serviceData['price'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
-            }
-        }
-
-        return response()->json([
-            'message' => 'Infirmier créé avec succès',
-            'data' => [
-                'id' => $nurse->id,
-                'first_name' => $user->first_name,
-                'last_name' => $user->last_name,
-                'email' => $user->email,
-                'phone_number' => $user->phone_number,
-                'city_name' => $city->name,
-                'zone_name' => $zone->name,
-                'services' => $request->services,
-            ]
-        ], 201);
-    }
-
-    public function GetAllNurses()
+    /**
+     * Create a new nurse with services.
+     *
+     * @param Request $request The HTTP request with nurse data
+     * @return JsonResponse JSON response with created nurse
+     */
+    public function createNurse(Request $request): JsonResponse
     {
         try {
-            $nurses = DB::table('nurses')
-                ->join('users', 'nurses.user_id', '=', 'users.id')
-                ->join('cities', 'nurses.city_id', '=', 'cities.id')
-                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
-                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
-                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('users.role', 'nurse')
-                ->select(
-                    'nurses.id as nurseId',
-                    'nurses.status',
-                    'users.id as user_id',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.nickname',
-                    'cities.name as city_name',
-                    'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'nurses.status','users.last_name', 'users.email', 'users.nickname', 'cities.name', 'zones.name')
-                ->get();
+            // Validate request
+            $validator = Validator::make($request->all(), $this->getNurseValidationRules());
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            // Verify city and zone
+            $city = City::where('name', $request->city_name)->first();
+            if (!$city) {
+                return $this->notFoundResponse('Ville introuvable');
+            }
+
+            $zone = Zone::where('name', $request->zone_name)
+                ->where('city_id', $city->id)
+                ->first();
+
+            if (!$zone) {
+                return $this->badRequestResponse('La zone sélectionnée ne correspond pas à la ville choisie');
+            }
+
+            // Create user
+            $user = $this->createNurseUser($request);
+
+            // Create nurse
+            $nurse = Nurse::create([
+                'user_id' => $user->id,
+                'city_id' => $city->id,
+                'zone_id' => $zone->id,
+                'status' => self::STATUS_ACTIVATED,
+            ]);
+
+            // Link services to nurse
+            $this->linkServicesToNurse($nurse->id, $request->services);
+
+            return $this->successResponse(
+                $this->formatNurseCreationResponse($nurse, $user, $city, $zone, $request->services),
+                'Infirmier créé avec succès',
+                201
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la création de l\'infirmier',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get all nurses with their information.
+     *
+     * @return JsonResponse JSON response with all nurses
+     */
+    public function getAllNurses(): JsonResponse
+    {
+        try {
+            $nurses = $this->fetchAllNurses();
 
             if ($nurses->isEmpty()) {
-                return response()->json([
-                    'message' => 'Aucun infirmier trouvé'
-                ], 404);
+                return $this->successResponse([], 'Aucun infirmier trouvé');
             }
 
-            return response()->json([
-                'message' => 'Infirmiers récupérés avec succès',
-                'data' => $nurses
-            ], 200);
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération des infirmiers',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
         }
     }
-    
-    public function GetNurseInfosById(Request $request)
+
+    /**
+     * Get nurse information by nurse ID from JWT.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with nurse info
+     */
+    public function getNurseInfosById(Request $request): JsonResponse
     {
         try {
-            $nurse_id = JWTHelper::getNurseId($request);
-            //$laboId = JWTHelper::getLaboId($request) ?? $request->input('laboId');
+            $nurseId = JwtHelper::getNurseId($request);
 
-            $nurse = DB::table('nurses')
-                ->join('users', 'nurses.user_id', '=', 'users.id')
-                ->join('cities', 'nurses.city_id', '=', 'cities.id')
-                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
-                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
-                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('nurses.id', $nurse_id)
-                ->where('users.role', 'nurse')
-                ->select(
-                    'nurses.id as nurse_id',
-                    'users.id as user_id',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.nickname',
-                    'cities.name as city_name',
-                    'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'nurses.status','users.last_name', 'users.email', 'users.nickname', 'cities.name', 'zones.name')
-                ->first();
-
-            if (!$nurse) {
-                return response()->json([
-                    'message' => 'Infirmier non trouvé',
-                    'id' => $nurse_id
-                ], 404);
+            if (!$nurseId) {
+                return $this->unauthorizedResponse('Utilisateur non authentifié');
             }
 
-            return response()->json([
-                'message' => 'Infirmier récupéré avec succès',
-                'data' => $nurse
-            ], 200);
+            $nurse = $this->fetchNurseById($nurseId);
+
+            if (!$nurse) {
+                return $this->notFoundResponse('Infirmier non trouvé');
+            }
+
+            return $this->successResponse(
+                $nurse,
+                'Infirmier récupéré avec succès'
+            );
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération de l\'infirmier',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la récupération de l\'infirmier',
+                $e->getMessage()
+            );
         }
     }
 
-    public function GetNurseByUserId(Request $request)
+    /**
+     * Get nurse information by user ID from JWT.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with nurse info
+     */
+    public function getNurseByUserId(Request $request): JsonResponse
     {
         try {
-            $User_id = JWTHelper::getUserId($request);
+            $userId = JwtHelper::getUserId($request);
 
-            $nurse = DB::table('nurses')
-                ->join('users', 'nurses.user_id', '=', 'users.id')
-                ->join('cities', 'nurses.city_id', '=', 'cities.id')
-                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
-                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
-                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('nurses.user_id', $User_id)
-                ->where('users.role', 'nurse')
-                ->select(
-                    'nurses.id as nurse_id',
-                    'users.id as user_id',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.nickname',
-                    'cities.name as city_name',
-                    'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.nickname', 'cities.name', 'zones.name')
-                ->first();
-
-            if (!$nurse) {
-                return response()->json([
-                    'message' => 'Infirmier non trouvé'
-                ], 404);
+            if (!$userId) {
+                return $this->unauthorizedResponse('Utilisateur non authentifié');
             }
 
-            return response()->json([
-                'message' => 'Infirmier récupéré avec succès',
-                'data' => $nurse
-            ], 200);
+            $nurse = $this->fetchNurseByUserId($userId);
+
+            if (!$nurse) {
+                return $this->notFoundResponse('Infirmier non trouvé');
+            }
+
+            return $this->successResponse(
+                $nurse,
+                'Infirmier récupéré avec succès'
+            );
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération de l\'infirmier',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la récupération de l\'infirmier',
+                $e->getMessage()
+            );
         }
     }
 
-
-    public function GetNursesByServices(Request $request)
+    /**
+     * Get nurses by service name.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with filtered nurses
+     */
+    public function getNursesByServices(Request $request): JsonResponse
     {
         try {
             $validator = Validator::make($request->all(), [
@@ -246,83 +210,346 @@ class NursesController extends Controller
             ]);
 
             if ($validator->fails()) {
-                return response()->json([
-                    'message' => 'Validation échouée',
-                    'errors' => $validator->errors()
-                ], 422);
+                return $this->validationErrorResponse($validator->errors());
             }
 
-            $service_name = $request->input('service_name');
-
-            $nurses = DB::table('nurses')
-                ->join('users', 'nurses.user_id', '=', 'users.id')
-                ->join('cities', 'nurses.city_id', '=', 'cities.id')
-                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
-                ->join('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
-                ->join('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('services.name', $service_name)
-                ->where('users.role', 'nurse')
-                ->select(
-                    'nurses.id as nurse_id',
-                    'users.id as user_id',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.nickname',
-                    'cities.name as city_name',
-                    'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.nickname', 'cities.name', 'zones.name')
-                ->get();
+            $nurses = $this->fetchNursesByServiceName($request->service_name);
 
             if ($nurses->isEmpty()) {
-                return response()->json([
-                    'message' => 'Aucun infirmier trouvé pour ce service'
-                ], 404);
+                return $this->successResponse([], 'Aucun infirmier trouvé pour ce service');
             }
 
-            return response()->json([
-                'message' => 'Infirmiers récupérés avec succès',
-                'data' => $nurses
-            ], 200);
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération des infirmiers',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
         }
     }
 
-    public function getNurseByServiceId(Request $request)
+    /**
+     * Get nurses by service ID.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with filtered nurses
+     */
+    public function getNurseByServiceId(Request $request): JsonResponse
     {
         try {
-            // Récupérer l'ID du service depuis le cookie nommé 'serviceId'
-            $service_id = $request->cookie('serviceId') ?? $request->input("serviceId");
+            $serviceId = $request->cookie('serviceId') ?? $request->input("serviceId");
 
-            // Validation de l'ID du service
-            $validator = Validator::make(['service_id' => $service_id], [
+            $validator = Validator::make(['service_id' => $serviceId], [
                 'service_id' => 'required|integer|exists:services,id'
             ]);
 
             if ($validator->fails()) {
-                return response()->json([
-                    'message' => 'Validation échouée',
-                    'errors' => $validator->errors()
-                ], 422);
+                return $this->validationErrorResponse($validator->errors());
             }
 
-            // Requête pour récupérer les infirmiers associés au service
+            $nurses = $this->fetchNursesByServiceId($serviceId);
+
+            if ($nurses->isEmpty()) {
+                return $this->successResponse([], 'Aucun infirmier trouvé pour ce service');
+            }
+
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get nurse by full name.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with nurse info
+     */
+    public function getNurseByUserName(Request $request): JsonResponse
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'first_name' => 'required|string|max:100',
+                'last_name' => 'required|string|max:100'
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $nurse = $this->fetchNurseByName(
+                $request->first_name,
+                $request->last_name
+            );
+
+            if (!$nurse) {
+                return $this->notFoundResponse('Infirmier non trouvé');
+            }
+
+            return $this->successResponse(
+                $nurse,
+                'Infirmier récupéré avec succès'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération de l\'infirmier',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get nurse statistics for the last 7 days.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with statistics
+     */
+    public function getNurseStats(Request $request): JsonResponse
+    {
+        try {
+            $nurseId = JwtHelper::getNurseId($request) ?? $request->input("nurseId");
+
+            if (!$nurseId) {
+                return $this->unauthorizedResponse('Utilisateur non authentifié ou infirmier non trouvé');
+            }
+
+            $now = Carbon::now();
+            $stats = $this->calculateNurseStats($nurseId, $now);
+
+            return $this->successResponse(
+                $stats,
+                'Statistiques récupérées avec succès'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération des statistiques',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Toggle nurse status between activated and disabled.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with updated status
+     */
+    public function toggleNurseStatus(Request $request): JsonResponse
+    {
+        try {
+            $nurseId = $request->cookie('nurseId') ?? $request->input('nurseId');
+            $currentStatus = $request->cookie('status') ?? $request->input('status');
+
+            // Validate nurse ID
+            if (!$nurseId || !is_numeric($nurseId)) {
+                return $this->badRequestResponse('ID de l\'infirmier invalide ou non trouvé');
+            }
+
+            // Validate current status
+            if (!in_array($currentStatus, [self::STATUS_ACTIVATED, self::STATUS_DISABLED])) {
+                return $this->badRequestResponse('Statut invalide');
+            }
+
+            // Check if nurse exists
+            $nurse = DB::table('nurses')->where('id', $nurseId)->first();
+            if (!$nurse) {
+                return $this->notFoundResponse('Infirmier non trouvé');
+            }
+
+            // Toggle status
+            $newStatus = $currentStatus === self::STATUS_ACTIVATED 
+                ? self::STATUS_DISABLED 
+                : self::STATUS_ACTIVATED;
+
+            // Update status
+            DB::table('nurses')
+                ->where('id', $nurseId)
+                ->update([
+                    'status' => $newStatus,
+                    'updated_at' => now(),
+                ]);
+
+            return $this->successResponse([
+                'nurse_id' => $nurseId,
+                'status' => $newStatus,
+            ], 'Statut de l\'infirmier mis à jour avec succès');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la mise à jour du statut de l\'infirmier',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get total patient count.
+     *
+     * @return JsonResponse JSON response with patient count
+     */
+    public function getPatientCount(): JsonResponse
+    {
+        try {
+            $count = Patient::count();
+
+            return $this->successResponse([
+                'patient_count' => $count,
+            ], 'Nombre de patients récupéré avec succès');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération du nombre de patients',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get nurses by city name.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with filtered nurses
+     */
+    public function getNursesByCity(Request $request): JsonResponse
+    {
+        try {
+            $cityName = $request->cookie('city_name') ?? $request->input('city_name');
+
+            $validator = Validator::make(['city_name' => $cityName], [
+                'city_name' => 'required|string|exists:cities,name'
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $nurses = DB::table('nurses')
+                ->join('users', 'nurses.user_id', '=', 'users.id')
+                ->join('cities', 'nurses.city_id', '=', 'cities.id')
+                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
+                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
+                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
+                ->where('cities.name', $cityName)
+                ->where('users.role', self::ROLE_NURSE)
+                ->where('nurses.status', self::STATUS_ACTIVATED)
+                ->select($this->getNurseSelectFields(true))
+                ->groupBy($this->getNurseGroupByFields(true, false))
+                ->get();
+
+            if ($nurses->isEmpty()) {
+                return $this->successResponse([], 'Aucun infirmier trouvé dans cette ville');
+            }
+
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get nurses by zone name.
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with filtered nurses
+     */
+    public function getNursesByZone(Request $request): JsonResponse
+    {
+        try {
+            $zoneName = $request->cookie('zone_name') ?? $request->input('zone_name');
+
+            $validator = Validator::make(['zone_name' => $zoneName], [
+                'zone_name' => 'required|string|exists:zones,name'
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $nurses = DB::table('nurses')
+                ->join('users', 'nurses.user_id', '=', 'users.id')
+                ->join('cities', 'nurses.city_id', '=', 'cities.id')
+                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
+                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
+                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
+                ->where('zones.name', $zoneName)
+                ->where('users.role', self::ROLE_NURSE)
+                ->where('nurses.status', self::STATUS_ACTIVATED)
+                ->select($this->getNurseSelectFields(true))
+                ->groupBy($this->getNurseGroupByFields(true, false))
+                ->get();
+
+            if ($nurses->isEmpty()) {
+                return $this->successResponse([], 'Aucun infirmier trouvé dans cette zone');
+            }
+
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
+        }
+    }
+
+    /**
+     * Get nurses by service and zone (combined filter).
+     *
+     * @param Request $request The HTTP request
+     * @return JsonResponse JSON response with filtered nurses
+     */
+    public function getNursesByServiceAndZone(Request $request): JsonResponse
+    {
+        try {
+            $serviceId = $request->cookie('serviceId') ?? $request->input('serviceId');
+            $zoneName = $request->cookie('zone_name') ?? $request->input('zone_name');
+
+            $validator = Validator::make([
+                'service_id' => $serviceId,
+                'zone_name' => $zoneName
+            ], [
+                'service_id' => 'required|integer|exists:services,id',
+                'zone_name' => 'required|string|exists:zones,name'
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
             $nurses = DB::table('nurses')
                 ->join('users', 'nurses.user_id', '=', 'users.id')
                 ->join('cities', 'nurses.city_id', '=', 'cities.id')
                 ->join('zones', 'nurses.zone_id', '=', 'zones.id')
                 ->join('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
                 ->join('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('services.id', $service_id)
-                ->where('users.role', 'nurse')
-                ->select(
+                ->where('services.id', $serviceId)
+                ->where('zones.name', $zoneName)
+                ->where('users.role', self::ROLE_NURSE)
+                ->where('nurses.status', self::STATUS_ACTIVATED)
+                ->select([
                     'nurses.id as nurse_id',
                     'users.id as user_id',
                     'users.first_name',
@@ -332,207 +559,419 @@ class NursesController extends Controller
                     'users.phone_number',
                     'cities.name as city_name',
                     'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.nickname', 'users.phone_number', 'cities.name', 'zones.name')
+                    'services.name as service_name',
+                    'nurse_service.price as service_price',
+                ])
                 ->get();
 
             if ($nurses->isEmpty()) {
-                return response()->json([
-                    'message' => 'Aucun infirmier trouvé pour ce service'
-                ], 404);
+                return $this->successResponse([], 'Aucun infirmier trouvé pour ce service dans cette zone');
             }
 
-            return response()->json([
-                'message' => 'Infirmiers récupérés avec succès',
-                'data' => $nurses
-            ], 200);
+            return $this->successResponse(
+                $nurses,
+                'Infirmiers récupérés avec succès'
+            );
 
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération des infirmiers',
-                'error' => $e->getMessage()
-            ], 500);
+            return $this->errorResponse(
+                'Erreur lors de la récupération des infirmiers',
+                $e->getMessage()
+            );
         }
     }
 
-    public function GetNurseByUserName(Request $request)
+    // =========================================================================
+    // Private Helper Methods
+    // =========================================================================
+
+    /**
+     * Get validation rules for nurse creation.
+     *
+     * @return array Validation rules
+     */
+    private function getNurseValidationRules(): array
     {
-        try {
-            $validator = Validator::make($request->all(), [
-                'first_name' => 'required|string|max:100',
-                'last_name' => 'required|string|max:100'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'message' => 'Validation échouée',
-                    'errors' => $validator->errors()
-                ], 422);
-            }
-
-            $first_name = $request->input('first_name');
-            $last_name = $request->input('last_name');
-
-            $nurse = DB::table('nurses')
-                ->join('users', 'nurses.user_id', '=', 'users.id')
-                ->join('cities', 'nurses.city_id', '=', 'cities.id')
-                ->join('zones', 'nurses.zone_id', '=', 'zones.id')
-                ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
-                ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
-                ->where('users.first_name', $first_name)
-                ->where('users.last_name', $last_name)
-                ->where('users.role', 'nurse')
-                ->select(
-                    'nurses.id as nurse_id',
-                    'users.id as user_id',
-                    'users.first_name',
-                    'users.last_name',
-                    'users.email',
-                    'users.nickname',
-                    'cities.name as city_name',
-                    'zones.name as zone_name',
-                    DB::raw('GROUP_CONCAT(services.name) as services')
-                )
-                ->groupBy('nurses.id', 'users.id', 'users.first_name', 'users.last_name', 'users.email', 'users.nickname', 'cities.name', 'zones.name')
-                ->first();
-
-            if (!$nurse) {
-                return response()->json([
-                    'message' => 'Infirmier non trouvé'
-                ], 404);
-            }
-
-            return response()->json([
-                'message' => 'Infirmier récupéré avec succès',
-                'data' => $nurse
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération de l\'infirmier',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        return [
+            'first_name' => 'required|string|max:255',
+            'last_name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'nickname' => 'required|string|unique:users,nickname',
+            'password' => 'required|string|min:6',
+            'phone_number' => 'required|string|max:20|unique:users,phone_number',
+            'city_name' => 'required|string',
+            'zone_name' => 'required|string',
+            'services' => 'required|array|min:' . self::MIN_SERVICES . '|max:' . self::MAX_SERVICES,
+            'services.*.name' => 'required|string|exists:services,name',
+            'services.*.price' => 'required|numeric|min:0',
+        ];
     }
 
-    public function getNurseStats(Request $request): JsonResponse
+    /**
+     * Create a user for the nurse.
+     *
+     * @param Request $request
+     * @return User
+     */
+    private function createNurseUser(Request $request): User
     {
-        try {
-            // Récupérer l'ID de l'infirmier à partir du token JWT ou de la requête
-            $nurse_id = JWTHelper::getNurseId($request) ?? $request->input("nurseId");
-            if (!$nurse_id) {
-                return response()->json([
-                    'message' => 'Utilisateur non authentifié ou infirmier non trouvé',
-                ], 401);
-            }
-
-            // Définir les intervalles de dates
-            $now = Carbon::now(); // 2025-07-06 18:40:00 +01
-            $sevenDaysFromNow = $now->copy()->addDays(7); // Jusqu'au 2025-07-13 18:40:00
-            $sevenDaysAgo = $now->copy()->subDays(7); // À partir du 2025-06-29 18:40:00
-
-            // Nombre de rendez-vous à venir dans les 7 prochains jours
-            $upcomingAppointmentsCount = Appointment::where('statut', '!=', 'annule')
-                ->whereBetween('apointementsDate', [$now, $sevenDaysFromNow])
-                ->whereHas('serviceNurse', function ($query) use ($nurse_id) {
-                    $query->where('nurse_id', $nurse_id);
-                })
-                ->count();
-
-            // Rendez-vous terminés dans les 7 derniers jours
-            $completedAppointments = Appointment::where('statut', 'termine')
-                ->whereBetween('apointementsDate', [$sevenDaysAgo, $now])
-                ->whereHas('serviceNurse', function ($query) use ($nurse_id) {
-                    $query->where('nurse_id', $nurse_id);
-                })
-                ->with('serviceNurse')
-                ->get();
-
-            // Nombre de rendez-vous terminés
-            $completedAppointmentsCount = $completedAppointments->count();
-
-            // Calcul du revenu total des rendez-vous terminés
-            $totalRevenue = $completedAppointments->sum(function ($appointment) {
-                return $appointment->serviceNurse->price ?? 0;
-            });
-
-            return response()->json([
-                'data' => [
-                    'upcoming_appointments_count' => $upcomingAppointmentsCount,
-                    'completed_appointments_count' => $completedAppointmentsCount,
-                    'total_revenue' => $totalRevenue,
-                ],
-                'message' => 'Statistiques récupérées avec succès',
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la récupération des statistiques',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
+        return User::create([
+            'first_name' => $request->first_name,
+            'last_name' => $request->last_name,
+            'nickname' => $request->nickname,
+            'email' => $request->email,
+            'phone_number' => $request->phone_number,
+            'password' => Hash::make($request->password),
+            'role' => self::ROLE_NURSE,
+        ]);
     }
 
-    public function toggleNurseStatus(Request $request)
+    /**
+     * Link services to a nurse.
+     *
+     * @param int $nurseId
+     * @param array $services
+     * @return void
+     */
+    private function linkServicesToNurse(int $nurseId, array $services): void
     {
-        try {
-            // Retrieve nurseId and status from cookies
-            $nurseId = $request->cookie('nurseId') ;
-            $currentStatus = $request->cookie('status') ;
-
-            // Validate inputs
-            if (!$nurseId || !is_numeric($nurseId)) {
-                return response()->json([
-                    'message' => 'ID de l\'infirmier invalide ou non trouvé dans les cookies.',
-                ], 400);
-            }
-
-            if (!in_array($currentStatus, ['activated', 'disabled'])) {
-                return response()->json([
-                    'message' => 'Statut invalide ou non trouvé dans les cookies.',
-                ], 400);
-            }
-
-            // Determine new status
-            $newStatus = $currentStatus === 'activated' ? 'disabled' : 'activated';
-
-            // Check if nurse exists
-            $nurse = DB::table('nurses')->where('id', $nurseId)->first();
-            if (!$nurse) {
-                return response()->json([
-                    'message' => 'Infirmier non trouvé.',
-                ], 404);
-            }
-
-            // Update nurse status in the database
-            DB::table('nurses')
-                ->where('id', $nurseId)
-                ->update(['status' => $newStatus]);
-
-            return response()->json([
-                'message' => 'Statut de l\'infirmier mis à jour avec succès.',
-                'data' => [
+        foreach ($services as $serviceData) {
+            $service = Service::where('name', $serviceData['name'])->first();
+            if ($service) {
+                DB::table('nurse_service')->insert([
                     'nurse_id' => $nurseId,
-                    'status' => $newStatus,
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'message' => 'Erreur lors de la mise à jour du statut de l\'infirmier.',
-                'error' => $e->getMessage(),
-            ], 500);
+                    'service_id' => $service->id,
+                    'price' => $serviceData['price'],
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
     }
-    // Dans le contrôleur
-// Dans votre contrôleur, par exemple PatientController.php
-public function getPatientCount()
-{
-    $count = Patient::count(); // Compte tous les enregistrements dans la table patients
-    return response()->json(['patient_count' => $count]);
+
+    /**
+     * Get base nurse query with all joins.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private function getNurseBaseQuery()
+    {
+        return DB::table('nurses')
+            ->join('users', 'nurses.user_id', '=', 'users.id')
+            ->join('cities', 'nurses.city_id', '=', 'cities.id')
+            ->join('zones', 'nurses.zone_id', '=', 'zones.id')
+            ->leftJoin('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
+            ->leftJoin('services', 'nurse_service.service_id', '=', 'services.id')
+            ->where('users.role', self::ROLE_NURSE);
+    }
+
+    /**
+     * Get standard nurse select fields.
+     *
+     * @param bool $includePhone Whether to include phone number
+     * @return array
+     */
+    private function getNurseSelectFields(bool $includePhone = false): array
+    {
+        $fields = [
+            'nurses.id as nurse_id',
+            'nurses.status',
+            'users.id as user_id',
+            'users.first_name',
+            'users.last_name',
+            'users.email',
+            'users.nickname',
+            'cities.name as city_name',
+            'zones.name as zone_name',
+            DB::raw('GROUP_CONCAT(services.name) as services'),
+        ];
+
+        if ($includePhone) {
+            array_splice($fields, 7, 0, ['users.phone_number']);
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Get standard group by fields for nurse queries.
+     *
+     * @param bool $includePhone Whether to include phone number
+     * @param bool $includeStatus Whether to include status
+     * @return array
+     */
+    private function getNurseGroupByFields(bool $includePhone = false, bool $includeStatus = true): array
+    {
+        $fields = ['nurses.id', 'users.id', 'users.first_name', 'users.last_name', 
+                   'users.email', 'users.nickname', 'cities.name', 'zones.name'];
+
+        if ($includeStatus) {
+            array_splice($fields, 1, 0, ['nurses.status']);
+        }
+
+        if ($includePhone) {
+            array_splice($fields, $includeStatus ? 8 : 7, 0, ['users.phone_number']);
+        }
+
+        return $fields;
+    }
+
+    /**
+     * Fetch all nurses.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    private function fetchAllNurses()
+    {
+        return $this->getNurseBaseQuery()
+            ->select($this->getNurseSelectFields())
+            ->groupBy($this->getNurseGroupByFields())
+            ->get();
+    }
+
+    /**
+     * Fetch nurse by ID.
+     *
+     * @param int $nurseId
+     * @return object|null
+     */
+    private function fetchNurseById(int $nurseId): ?object
+    {
+        return $this->getNurseBaseQuery()
+            ->where('nurses.id', $nurseId)
+            ->select($this->getNurseSelectFields())
+            ->groupBy($this->getNurseGroupByFields())
+            ->first();
+    }
+
+    /**
+     * Fetch nurse by user ID.
+     *
+     * @param int $userId
+     * @return object|null
+     */
+    private function fetchNurseByUserId(int $userId): ?object
+    {
+        return $this->getNurseBaseQuery()
+            ->where('nurses.user_id', $userId)
+            ->select($this->getNurseSelectFields())
+            ->groupBy($this->getNurseGroupByFields(false, false))
+            ->first();
+    }
+
+    /**
+     * Fetch nurses by service name.
+     *
+     * @param string $serviceName
+     * @return \Illuminate\Support\Collection
+     */
+    private function fetchNursesByServiceName(string $serviceName)
+    {
+        return DB::table('nurses')
+            ->join('users', 'nurses.user_id', '=', 'users.id')
+            ->join('cities', 'nurses.city_id', '=', 'cities.id')
+            ->join('zones', 'nurses.zone_id', '=', 'zones.id')
+            ->join('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
+            ->join('services', 'nurse_service.service_id', '=', 'services.id')
+            ->where('services.name', $serviceName)
+            ->where('users.role', self::ROLE_NURSE)
+            ->select($this->getNurseSelectFields())
+            ->groupBy($this->getNurseGroupByFields(false, false))
+            ->get();
+    }
+
+    /**
+     * Fetch nurses by service ID.
+     *
+     * @param int $serviceId
+     * @return \Illuminate\Support\Collection
+     */
+    private function fetchNursesByServiceId(int $serviceId)
+    {
+        return DB::table('nurses')
+            ->join('users', 'nurses.user_id', '=', 'users.id')
+            ->join('cities', 'nurses.city_id', '=', 'cities.id')
+            ->join('zones', 'nurses.zone_id', '=', 'zones.id')
+            ->join('nurse_service', 'nurses.id', '=', 'nurse_service.nurse_id')
+            ->join('services', 'nurse_service.service_id', '=', 'services.id')
+            ->where('services.id', $serviceId)
+            ->where('users.role', self::ROLE_NURSE)
+            ->select($this->getNurseSelectFields(true))
+            ->groupBy($this->getNurseGroupByFields(true, false))
+            ->get();
+    }
+
+    /**
+     * Fetch nurse by full name.
+     *
+     * @param string $firstName
+     * @param string $lastName
+     * @return object|null
+     */
+    private function fetchNurseByName(string $firstName, string $lastName): ?object
+    {
+        return $this->getNurseBaseQuery()
+            ->where('users.first_name', $firstName)
+            ->where('users.last_name', $lastName)
+            ->select($this->getNurseSelectFields())
+            ->groupBy($this->getNurseGroupByFields(false, false))
+            ->first();
+    }
+
+    /**
+     * Calculate nurse statistics.
+     *
+     * @param int $nurseId
+     * @param Carbon $now
+     * @return array
+     */
+    private function calculateNurseStats(int $nurseId, Carbon $now): array
+    {
+        $futureDate = $now->copy()->addDays(self::STATS_DAYS_PERIOD);
+        $pastDate = $now->copy()->subDays(self::STATS_DAYS_PERIOD);
+
+        // Upcoming appointments count
+        $upcomingCount = Appointment::where('statut', '!=', self::APPOINTMENT_STATUS_CANCELLED)
+            ->whereBetween('apointementsDate', [$now, $futureDate])
+            ->whereHas('serviceNurse', fn($query) => $query->where('nurse_id', $nurseId))
+            ->count();
+
+        // Completed appointments with revenue
+        $completedAppointments = Appointment::where('statut', self::APPOINTMENT_STATUS_COMPLETED)
+            ->whereBetween('apointementsDate', [$pastDate, $now])
+            ->whereHas('serviceNurse', fn($query) => $query->where('nurse_id', $nurseId))
+            ->with('serviceNurse')
+            ->get();
+
+        $completedCount = $completedAppointments->count();
+        $totalRevenue = $completedAppointments->sum(fn($apt) => $apt->serviceNurse->price ?? 0);
+
+        return [
+            'upcoming_appointments_count' => $upcomingCount,
+            'completed_appointments_count' => $completedCount,
+            'total_revenue' => $totalRevenue,
+            'period_days' => self::STATS_DAYS_PERIOD,
+        ];
+    }
+
+    /**
+     * Format nurse creation response.
+     *
+     * @param Nurse $nurse
+     * @param User $user
+     * @param City $city
+     * @param Zone $zone
+     * @param array $services
+     * @return array
+     */
+    private function formatNurseCreationResponse(Nurse $nurse, User $user, City $city, Zone $zone, array $services): array
+    {
+        return [
+            'id' => $nurse->id,
+            'first_name' => $user->first_name,
+            'last_name' => $user->last_name,
+            'email' => $user->email,
+            'phone_number' => $user->phone_number,
+            'city_name' => $city->name,
+            'zone_name' => $zone->name,
+            'services' => $services,
+            'status' => $nurse->status,
+        ];
+    }
+
+    /**
+     * Return a standardized success response.
+     *
+     * @param mixed $data Response data
+     * @param string $message Success message
+     * @param int $statusCode HTTP status code
+     * @return JsonResponse
+     */
+    private function successResponse($data, string $message, int $statusCode = 200): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'data' => $data,
+            'message' => $message,
+        ], $statusCode);
+    }
+
+    /**
+     * Return a standardized error response.
+     *
+     * @param string $message Error message
+     * @param string|null $error Detailed error information
+     * @param int $statusCode HTTP status code
+     * @return JsonResponse
+     */
+    private function errorResponse(string $message, ?string $error = null, int $statusCode = 500): JsonResponse
+    {
+        $response = [
+            'success' => false,
+            'message' => $message,
+        ];
+
+        if ($error !== null) {
+            $response['error'] = $error;
+        }
+
+        return response()->json($response, $statusCode);
+    }
+
+    /**
+     * Return a validation error response.
+     *
+     * @param mixed $errors Validation errors
+     * @return JsonResponse
+     */
+    private function validationErrorResponse($errors): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => 'Erreur de validation',
+            'errors' => $errors,
+        ], 422);
+    }
+
+    /**
+     * Return an unauthorized response.
+     *
+     * @param string $message Error message
+     * @return JsonResponse
+     */
+    private function unauthorizedResponse(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], 401);
+    }
+
+    /**
+     * Return a not found response.
+     *
+     * @param string $message Error message
+     * @return JsonResponse
+     */
+    private function notFoundResponse(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], 404);
+    }
+
+    /**
+     * Return a bad request response.
+     *
+     * @param string $message Error message
+     * @return JsonResponse
+     */
+    private function badRequestResponse(string $message): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], 400);
+    }
 }
-
-}
-
-

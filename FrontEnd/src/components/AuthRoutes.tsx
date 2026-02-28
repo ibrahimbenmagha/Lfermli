@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
-   import { useNavigate } from 'react-router-dom';
-   import axiosInstance from '../axiosConfig';
+import { useState, useEffect, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../axiosConfig';
 import LoadingComponent from './LoadingComponent';
-   // Route protégée pour les patients
 
-   
-   export const PatientRoute = ({ children }) => {
+interface RouteProps {
+  children: ReactNode;
+}
+
+// Route protégée pour les patients
+export const PatientRoute = ({ children }: RouteProps) => {
      const navigate = useNavigate();
      const [loading, setLoading] = useState(true);
      const [authenticated, setAuthenticated] = useState(false);
@@ -36,8 +39,8 @@ import LoadingComponent from './LoadingComponent';
      return authenticated ? children : null;
    };
 
-   // Route protégée pour les infirmières
-   export const NurseRoute = ({ children }) => {
+// Route protégée pour les infirmières
+export const NurseRoute = ({ children }: RouteProps) => {
      const navigate = useNavigate();
      const [loading, setLoading] = useState(true);
      const [authenticated, setAuthenticated] = useState(false);
@@ -68,8 +71,8 @@ import LoadingComponent from './LoadingComponent';
      return authenticated ? children : null;
    };
 
-   // Route protégée pour les administrateurs
-   export const AdminRoute = ({ children }) => {
+// Route protégée pour les administrateurs
+export const AdminRoute = ({ children }: RouteProps) => {
      const navigate = useNavigate();
      const [loading, setLoading] = useState(true);
      const [authenticated, setAuthenticated] = useState(false);
@@ -100,8 +103,8 @@ import LoadingComponent from './LoadingComponent';
      return authenticated ? children : null;
    };
 
-   // Route pour les utilisateurs non authentifiés (redirige les utilisateurs authentifiés)
-   export const AuthRoute = ({ children }) => {
+// Route pour les utilisateurs non authentifiés (redirige les utilisateurs authentifiés)
+export const AuthRoute = ({ children }: RouteProps) => {
      const navigate = useNavigate();
      const [loading, setLoading] = useState(true);
      const [shouldRedirect, setShouldRedirect] = useState(false);

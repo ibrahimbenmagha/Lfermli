@@ -54,4 +54,10 @@ class Appointment extends Model
     {
         return $this->hasMany(Payment::class);
     }
+
+    // Rendez-vous a une facture
+    public function invoice()
+    {
+        return $this->hasOne(Invoice::class);
+    }
 }

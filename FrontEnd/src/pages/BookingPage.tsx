@@ -30,6 +30,11 @@ import { toast } from '@/hooks/use-toast';
 import axiosInstance from '../axiosConfig';
 import { AxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
+import StripePaymentForm from '@/components/StripePaymentForm';
+
+const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY || 'pk_test_placeholder');
 
 const bookingSchema = z.object({
   service: z.string().min(1, "Veuillez sélectionner un service"),
@@ -37,6 +42,7 @@ const bookingSchema = z.object({
   date: z.date({
     required_error: "Veuillez sélectionner une date",
   }),
+  time: z.string().min(1, "Veuillez sélectionner l'heure"),
   address: z.string().min(10, "Veuillez saisir une adresse complète"),
   emergencyLevel: z.enum(["normal", "urgent", "super_urgent"], {
     required_error: "Veuillez sélectionner un niveau d'urgence",
@@ -60,6 +66,12 @@ const BookingPage = () => {
   const [loadingServices, setLoadingServices] = useState(true);
   const [loadingNurses, setLoadingNurses] = useState(false);
   const [loadingPatient, setLoadingPatient] = useState(false);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<'home' | 'online' | null>(null);
+  const [clientSecret, setClientSecret] = useState<string>("");
+  const [appointmentId, setAppointmentId] = useState<string>("");
+  const [processingPayment, setProcessingPayment] = useState(false);
 
   const form = useForm<BookingFormData>({
     resolver: zodResolver(bookingSchema),
@@ -201,9 +213,17 @@ const BookingPage = () => {
       document.cookie = `nurseId=${form.watch('nurse')}; path=/; max-age=3600;`;
       document.cookie = `emergencyLevel=${form.watch('emergencyLevel')}; path=/; max-age=3600;`;
       setStep(3);
-    } else if (step === 3 && form.watch('date')) {
-      document.cookie = `date=${form.watch('date').toISOString()}; path=/; max-age=3600;`;
+    } else if (step === 3 && form.watch('date') && form.watch('time')) {
+      const date = form.watch('date');
+      const time = form.watch('time');
+      const [hours, minutes] = time.split(':');
+      const dateTime = new Date(date);
+      dateTime.setHours(parseInt(hours), parseInt(minutes));
+      
+      document.cookie = `date=${dateTime.toISOString()}; path=/; max-age=3600;`;
       setStep(4);
+    } else if (step === 4 && form.watch('address')) {
+      setStep(5);
     }
   };
 
@@ -212,22 +232,49 @@ const BookingPage = () => {
   };
 
   const handleValidate = async () => {
+    if (!paymentMethod) {
+      toast({
+        title: "Erreur",
+        description: "Veuillez sélectionner une méthode de paiement.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
+      setProcessingPayment(true);
       const response = await axiosInstance.post('createAppointment', {
         address: form.getValues('address'),
       });
-      toast({
-        title: "Succès",
-        description: response.data.message || "Rendez-vous créé avec succès.",
+      
+      const newApptId = response.data.data.id;
+      setAppointmentId(newApptId);
+
+      // Set payment method on backend
+      await axiosInstance.post(`appointment/${newApptId}/payment-method`, {
+        method: paymentMethod
       });
-      navigate('/patient/dashboard');
+
+      if (paymentMethod === 'online') {
+        const intentRes = await axiosInstance.post(`appointment/${newApptId}/create-payment-intent`);
+        setClientSecret(intentRes.data.clientSecret);
+      } else {
+        // Home payment - direct success redirect (or wait for confirmation)
+        toast({
+          title: "Succès",
+          description: "Rendez-vous créé avec succès. Paiement à domicile sélectionné.",
+        });
+        navigate('/patient/dashboard');
+      }
     } catch (error) {
-      const axiosError = error as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
+      const axiosError = error as AxiosError<{ message?: string }>;
       toast({
         title: "Erreur",
-        description: axiosError.response?.data?.message || "Échec de la création du rendez-vous. Veuillez réessayer.",
+        description: axiosError.response?.data?.message || "Échec de la validation du rendez-vous.",
         variant: "destructive",
       });
+    } finally {
+      setProcessingPayment(false);
     }
   };
 
@@ -283,7 +330,7 @@ const BookingPage = () => {
       <div className="bg-white shadow-lg border-b">
         <div className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-center space-x-8">
-            {[1, 2, 3, 4].map((stepNumber) => (
+            {[1, 2, 3, 4, 5].map((stepNumber) => (
               <div key={stepNumber} className="flex items-center">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shadow-lg ${
                   step >= stepNumber 
@@ -298,10 +345,11 @@ const BookingPage = () => {
                   {stepNumber === 1 && 'Choisir le Service'}
                   {stepNumber === 2 && 'Choisir l\'Infirmier'}
                   {stepNumber === 3 && 'Choisir la Date'}
-                  {stepNumber === 4 && 'Vos Informations'}
+                  {stepNumber === 4 && 'Détails'}
+                  {stepNumber === 5 && 'Paiement'}
                 </span>
-                {stepNumber < 4 && (
-                  <div className={`w-20 h-1 mx-6 rounded-full ${
+                {stepNumber < 5 && (
+                  <div className={`w-12 h-1 mx-2 rounded-full ${
                     step > stepNumber ? 'bg-gradient-to-r from-blue-500 to-green-500' : 'bg-gray-200'
                   }`} />
                 )}
@@ -516,80 +564,106 @@ const BookingPage = () => {
                 </Card>
               )}
 
-              {/* Step 3: Date Selection */}
+              {/* Step 3: Date & Time Selection */}
               {step === 3 && (
                 <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur-sm">
-                  <CardHeader className="text-center pb-8">
+                  <CardHeader className="text-center pb-8 border-b border-gray-100">
                     <CardTitle className="flex items-center justify-center gap-3 text-3xl text-gray-800">
                       <CalendarIcon className="h-8 w-8 text-blue-600" />
-                      Choisissez votre date
+                      Quand souhaitez-vous votre soin ?
                     </CardTitle>
                     <CardDescription className="text-lg text-gray-600 mt-4">
-                      Sélectionnez la date qui vous convient pour votre rendez-vous
+                      Sélectionnez une date puis choisissez parmi les créneaux disponibles
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-8">
-                    <FormField
-                      control={form.control}
-                      name="date"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-col items-center">
-                          <FormLabel className="text-lg font-semibold text-gray-800">Date du rendez-vous</FormLabel>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <FormControl>
-                                <Button
-                                  variant="outline"
-                                  className={cn(
-                                    "w-full max-w-md h-14 pl-4 text-left font-normal text-lg border-2",
-                                    !field.value && "text-muted-foreground"
-                                  )}
-                                >
-                                  {field.value ? (
-                                    format(field.value, "PPP", { locale: fr })
-                                  ) : (
-                                    <span>Sélectionnez une date</span>
-                                  )}
-                                  <CalendarIcon className="ml-auto h-5 w-5 opacity-50" />
-                                </Button>
-                              </FormControl>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-auto p-0" align="center">
-                              <Calendar
-                                mode="single"
-                                selected={field.value}
-                                onSelect={(date) => {
-                                  field.onChange(date);
-                                }}
-                                disabled={(date) =>
-                                  date < new Date() || date > new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-                                }
-                                initialFocus
-                                className="pointer-events-auto"
-                              />
-                            </PopoverContent>
-                          </Popover>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                  <CardContent className="p-8">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                      <div className="space-y-6">
+                        <h4 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                          1. Choisir la date
+                        </h4>
+                        <div className="flex justify-center p-4 bg-white rounded-2xl shadow-inner border border-blue-50">
+                          <Calendar
+                            mode="single"
+                            selected={form.watch('date')}
+                            onSelect={(date) => {
+                              form.setValue('date', date as Date);
+                              form.setValue('time', ''); // Reset time when date changes
+                            }}
+                            className="rounded-md"
+                            disabled={(date) => 
+                              date < new Date(new Date().setHours(0,0,0,0)) || 
+                              date > new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+                            }
+                            initialFocus
+                          />
+                        </div>
+                      </div>
 
-                    <div className="flex justify-between pt-6">
+                      <div className="space-y-6">
+                        <h4 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                          2. Choisir l'heure
+                        </h4>
+                        
+                        {!form.watch('date') ? (
+                          <div className="flex flex-col items-center justify-center h-[300px] p-8 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 text-gray-500">
+                            <CalendarIcon className="h-12 w-12 mb-4 opacity-20" />
+                            <p className="text-center">Veuillez d'abord sélectionner une date sur le calendrier</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4 animate-in fade-in slide-in-from-right duration-500">
+                            {loadingSlots ? (
+                              <div className="flex flex-col items-center justify-center h-[300px]">
+                                <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-4" />
+                                <p className="text-gray-500">Recherche des créneaux...</p>
+                              </div>
+                            ) : availableSlots.length > 0 ? (
+                              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                                {availableSlots.map((slot) => (
+                                  <Button
+                                    key={slot}
+                                    type="button"
+                                    variant={form.watch('time') === slot ? 'default' : 'outline'}
+                                    className={`py-6 text-lg font-bold transition-all duration-200 border-2 ${
+                                      form.watch('time') === slot 
+                                        ? 'bg-blue-600 text-white border-blue-600 shadow-lg scale-105' 
+                                        : 'hover:border-blue-400 hover:bg-blue-50 border-gray-100'
+                                    }`}
+                                    onClick={() => form.setValue('time', slot)}
+                                  >
+                                    <Clock className="h-4 w-4 mr-2" />
+                                    {slot}
+                                  </Button>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center h-[300px] p-8 bg-red-50 rounded-2xl border-2 border-dashed border-red-200 text-red-600">
+                                <AlertCircle className="h-12 w-12 mb-4 opacity-50" />
+                                <p className="text-center font-semibold">Aucun créneau disponible</p>
+                                <p className="text-sm text-center mt-2 opacity-80">Essayez une autre date ou changez d'infirmier(ère).</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between mt-12 pt-8 border-t border-gray-100">
                       <Button 
                         type="button" 
                         variant="outline" 
                         onClick={prevStep}
-                        className="px-8 py-3 text-lg font-semibold border-2"
+                        className="px-10 py-6 text-lg font-bold border-2 hover:bg-gray-50"
                       >
                         ← Retour
                       </Button>
                       <Button 
                         type="button" 
                         onClick={nextStep}
-                        disabled={!form.watch('date')}
-                        className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 px-8 py-3 text-lg font-semibold"
+                        disabled={!form.watch('date') || !form.watch('time')}
+                        className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 px-12 py-6 text-xl font-bold rounded-xl shadow-xl transform transition hover:scale-105"
                       >
-                        Continuer →
+                        Valider l'horaire →
                       </Button>
                     </div>
                   </CardContent>
@@ -715,13 +789,104 @@ const BookingPage = () => {
                       </Button>
                       <Button 
                         type="button" 
-                        onClick={handleValidate}
+                        onClick={nextStep}
                         disabled={loadingPatient || !form.watch('address')}
-                        className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 px-8 py-3 text-lg font-semibold"
+                        className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 px-12 py-4 text-xl font-bold rounded-xl shadow-lg transform transition hover:scale-105 active:scale-95"
                       >
-                        Valider ✓
+                        Continuer vers le paiement →
                       </Button>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Step 5: Payment */}
+              {step === 5 && (
+                <Card className="shadow-2xl border-0 bg-white/80 backdrop-blur-sm overflow-hidden">
+                  <CardHeader className="text-center pb-8 bg-gradient-to-r from-blue-600/10 to-green-600/10 mb-6">
+                    <CardTitle className="flex items-center justify-center gap-3 text-3xl text-gray-800">
+                      <Shield className="h-8 w-8 text-blue-600" />
+                      Sécurisez votre rendez-vous
+                    </CardTitle>
+                    <CardDescription className="text-lg text-gray-600 mt-4">
+                      Choisissez comment vous souhaitez régler votre prestation
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="max-w-4xl mx-auto space-y-8">
+                    {!clientSecret ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div 
+                          className={`p-8 rounded-2xl border-3 cursor-pointer transition-all duration-300 transform hover:scale-105 ${
+                            paymentMethod === 'online' 
+                              ? 'border-blue-500 bg-blue-50 shadow-blue-100 shadow-2xl scale-105' 
+                              : 'border-gray-100 bg-white hover:border-blue-200'
+                          }`}
+                          onClick={() => setPaymentMethod('online')}
+                        >
+                          <div className="flex flex-col items-center text-center space-y-4">
+                            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
+                              <Star className="h-8 w-8 text-blue-600" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-gray-800">Paiement en ligne</h3>
+                            <p className="text-gray-600">Payez par carte bancaire (Visa/Mastercard) en toute sécurité via Stripe.</p>
+                            <span className="inline-block px-4 py-1 bg-green-100 text-green-700 rounded-full text-sm font-bold animate-pulse">Recommandé</span>
+                          </div>
+                        </div>
+
+                        <div 
+                          className={`p-8 rounded-2xl border-3 cursor-pointer transition-all duration-300 transform hover:scale-105 ${
+                            paymentMethod === 'home' 
+                              ? 'border-green-500 bg-green-50 shadow-green-100 shadow-2xl scale-105' 
+                              : 'border-gray-100 bg-white hover:border-green-200'
+                          }`}
+                          onClick={() => setPaymentMethod('home')}
+                        >
+                          <div className="flex flex-col items-center text-center space-y-4">
+                            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                              <MapPin className="h-8 w-8 text-green-600" />
+                            </div>
+                            <h3 className="text-2xl font-bold text-gray-800">Paiement à domicile</h3>
+                            <p className="text-gray-600">Réglez directement l'infirmier(ère) au moment de la prestation.</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="max-w-md mx-auto bg-white p-8 rounded-2xl shadow-xl border border-blue-50 animate-in fade-in zoom-in duration-300">
+                        <h4 className="text-2xl font-bold text-center mb-6 flex items-center justify-center gap-2">
+                          <CheckCircle className="h-6 w-6 text-blue-600" />
+                          Finaliser le paiement
+                        </h4>
+                        <Elements stripe={stripePromise} options={{ clientSecret }}>
+                          <StripePaymentForm 
+                            clientSecret={clientSecret} 
+                            appointmentId={appointmentId}
+                            onSuccess={() => navigate('/patient/dashboard')} 
+                          />
+                        </Elements>
+                      </div>
+                    )}
+
+                    {!clientSecret && (
+                      <div className="flex justify-between pt-8 border-t border-gray-100">
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          onClick={prevStep}
+                          className="px-8 py-3 text-lg border-2 hover:bg-gray-50"
+                        >
+                          ← Retour
+                        </Button>
+                        <Button 
+                          type="button" 
+                          onClick={handleValidate}
+                          disabled={!paymentMethod || processingPayment}
+                          className="bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700 px-12 py-6 text-xl font-bold shadow-xl rounded-xl"
+                        >
+                          {processingPayment ? <Loader2 className="animate-spin mr-2" /> : null}
+                          {paymentMethod === 'online' ? 'Aller au paiement →' : 'Confirmer le rendez-vous ✓'}
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}
