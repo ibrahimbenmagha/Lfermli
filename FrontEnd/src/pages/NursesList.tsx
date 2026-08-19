@@ -2,11 +2,15 @@ import { useState, useEffect } from 'react';
 import { Navigation } from '@/components/Navigation';
 import { NurseCard } from '@/components/NurseCard';
 import { Input } from '@/components/ui/input';
-import { Search, Users, Play, Heart, Shield, Award, MapPin, Star } from 'lucide-react';
+import { Search, Users, Play, Heart, Shield, Award, MapPin, Star, Map, LayoutGrid } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import axiosInstance from '../axiosConfig';
 import { toast } from '@/hooks/use-toast';
 import { AxiosError } from 'axios';
+import { useNavigate } from 'react-router-dom';
+import NurseMap from '@/components/NurseMap';
+import NurseVerificationBadge from '@/components/NurseVerificationBadge';
+import { CardSkeleton } from '@/components/Skeletons';
 import {
   Select,
   SelectContent,
@@ -57,6 +61,8 @@ const fallbackNursesData = [
 ];
 
 export const NursesList = () => {
+  const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
   const [searchCity, setSearchCity] = useState('');
   const [selectedZone, setSelectedZone] = useState('');
   const [selectedService, setSelectedService] = useState('');
@@ -427,12 +433,34 @@ export const NursesList = () => {
                 </Select>
               )}
 
-              <Button variant="outline" onClick={resetFilters}>
-                Réinitialiser
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" onClick={resetFilters}>
+                  Réinitialiser
+                </Button>
+                <div className="flex items-center border rounded-lg p-0.5 bg-slate-100">
+                  <Button
+                    size="sm"
+                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                    className="text-xs h-8 px-2.5"
+                    onClick={() => setViewMode('grid')}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5 mr-1" />
+                    Grille
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={viewMode === 'map' ? 'default' : 'ghost'}
+                    className="text-xs h-8 px-2.5"
+                    onClick={() => setViewMode('map')}
+                  >
+                    <Map className="h-3.5 w-3.5 mr-1" />
+                    Carte
+                  </Button>
+                </div>
+              </div>
               
-              <div className="text-gray-600">
-                <span className="font-medium">{filteredNurses.length}</span> infirmière(s) trouvée(s)
+              <div className="text-gray-600 font-medium text-sm">
+                <span>{filteredNurses.length}</span> infirmière(s) trouvée(s)
               </div>
             </div>
             
@@ -472,15 +500,18 @@ export const NursesList = () => {
         </div>
       </section>
 
-      {/* Nurses Grid */}
+      {/* Nurses Grid or Map Section */}
       <section className="pb-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="bg-white rounded-2xl shadow-lg p-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-gray-600">Chargement des infirmières...</p>
-              </div>
+          {viewMode === 'map' ? (
+            <div className="mb-8">
+              <NurseMap selectedServiceId={selectedService ? Number(selectedService) : undefined} />
+            </div>
+          ) : loading ? (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                <CardSkeleton key={n} />
+              ))}
             </div>
           ) : filteredNurses.length === 0 ? (
             <div className="text-center py-12">
@@ -499,50 +530,59 @@ export const NursesList = () => {
               {filteredNurses.map((nurse) => (
                 <div 
                   key={nurse.nurse_id || nurse.user_id} 
-                  className="bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden"
+                  className="bg-white rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden border border-slate-100 flex flex-col justify-between"
                 >
-                  <div className="h-48 bg-gradient-to-r from-blue-400 to-green-400 relative">
-                    <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2">
-                      <div className="w-24 h-24 rounded-full bg-white p-1">
-                        <div className="w-full h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500 flex items-center justify-center">
-                          <span className="text-white text-2xl font-bold">
-                            {nurse.first_name?.charAt(0)}{nurse.last_name?.charAt(0)}
-                          </span>
+                  <div>
+                    <div className="h-36 bg-gradient-to-r from-teal-500 to-blue-600 relative">
+                      <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2">
+                        <div className="w-20 h-20 rounded-full bg-white p-1 shadow-md">
+                          <div className="w-full h-full rounded-full bg-gradient-to-r from-teal-600 to-blue-600 flex items-center justify-center">
+                            <span className="text-white text-xl font-black">
+                              {nurse.first_name?.charAt(0)}{nurse.last_name?.charAt(0)}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="pt-14 pb-6 px-6 text-center">
-                    <h3 className="text-xl font-bold text-gray-900 mb-1">
-                      {nurse.first_name} {nurse.last_name}
-                    </h3>
-                    <p className="text-gray-600 mb-2 flex items-center justify-center">
-                      <MapPin className="h-4 w-4 mr-1" />
-                      {nurse.city_name} {nurse.zone_name && `- ${nurse.zone_name}`}
-                    </p>
-                    {nurse.note_over_5 && (
-                      <div className="flex items-center justify-center mb-3">
-                        <Star className="h-4 w-4 text-yellow-400 fill-yellow-400 mr-1" />
-                        <span className="text-sm font-medium">{nurse.note_over_5}/5</span>
+                    <div className="pt-12 pb-4 px-5 text-center">
+                      <h3 className="text-lg font-bold text-gray-900 mb-0.5">
+                        {nurse.first_name} {nurse.last_name}
+                      </h3>
+                      <p className="text-xs text-gray-500 mb-2 flex items-center justify-center">
+                        <MapPin className="h-3.5 w-3.5 mr-1 text-red-500" />
+                        {nurse.city_name} {nurse.zone_name && `- ${nurse.zone_name}`}
+                      </p>
+
+                      <div className="flex items-center justify-center gap-2 mb-3">
+                        <div className="flex items-center bg-amber-50 text-amber-800 text-xs px-2 py-0.5 rounded-full font-bold border border-amber-200/60">
+                          <Star className="h-3 w-3 text-amber-500 fill-amber-500 mr-1" />
+                          <span>{nurse.note_over_5 || 4.8}/5</span>
+                        </div>
+                        <NurseVerificationBadge isVerified={true} size="sm" />
                       </div>
-                    )}
-                    {nurse.services && (
-                      <div className="flex flex-wrap justify-center gap-1 mb-3">
-                        {nurse.services.split(',').slice(0, 2).map((service, idx) => (
-                          <span 
-                            key={idx}
-                            className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs"
-                          >
-                            {service.trim()}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="mt-4">
-                      <Button className="w-full bg-gradient-to-r from-blue-600 to-green-600 hover:from-blue-700 hover:to-green-700">
-                        Voir le profil
-                      </Button>
+
+                      {nurse.services && (
+                        <div className="flex flex-wrap justify-center gap-1 mb-3">
+                          {nurse.services.split(',').slice(0, 2).map((service, idx) => (
+                            <span 
+                              key={idx}
+                              className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[11px] font-medium"
+                            >
+                              {service.trim()}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                  </div>
+
+                  <div className="p-4 pt-0">
+                    <Button 
+                      className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs py-2 rounded-xl shadow-xs"
+                      onClick={() => navigate(`/patient/booking?nurseId=${nurse.nurse_id || nurse.user_id}`)}
+                    >
+                      Prendre Rendez-vous
+                    </Button>
                   </div>
                 </div>
               ))}

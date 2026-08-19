@@ -15,6 +15,15 @@ class Nurse extends Model
         'zone_id',
         'note_over_5',
         'status',
+        'is_verified',
+        'license_number',
+        'diploma_document',
+        'verified_at',
+    ];
+
+    protected $casts = [
+        'is_verified' => 'boolean',
+        'verified_at' => 'datetime',
     ];
 
     /**

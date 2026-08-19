@@ -71,7 +71,7 @@ const LoginForm = ({ userType, title, icon: Icon, formData, handleInputChange, h
         </Link>
         <p className="text-sm text-gray-600">
           Pas encore de compte ?{' '}
-          <Link to="/register" className="text-primary hover:underline">
+          <Link to="/RegisterPatient" className="text-primary hover:underline">
             S'inscrire
           </Link>
         </p>

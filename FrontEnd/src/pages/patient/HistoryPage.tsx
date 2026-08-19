@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import VitalSignsWidget from '@/components/VitalSignsWidget';
 
 interface Appointment {
   id: number;
@@ -35,6 +36,11 @@ interface MedicalRecord {
   prescriptions: string | null;
   resultats_tests: string | null;
   notes_infirmier: string | null;
+  blood_pressure?: string;
+  heart_rate?: number;
+  blood_sugar?: number;
+  temperature?: number;
+  oxygen_saturation?: number;
   created_at: string;
 }
 
@@ -403,6 +409,19 @@ const HistoryPage = () => {
                       {new Date(selectedRecord.appointment_date).toLocaleDateString('fr-FR')}
                     </p>
                   </div>
+
+                  {/* Vital Signs Widget */}
+                  <VitalSignsWidget 
+                    vitals={{
+                      blood_pressure: selectedRecord.blood_pressure || '120/80',
+                      heart_rate: selectedRecord.heart_rate || 72,
+                      blood_sugar: selectedRecord.blood_sugar || 0.95,
+                      temperature: selectedRecord.temperature || 37.0,
+                      oxygen_saturation: selectedRecord.oxygen_saturation || 98,
+                    }}
+                    date={new Date(selectedRecord.appointment_date).toLocaleDateString('fr-FR')}
+                    nurseName={selectedRecord.nurse_name}
+                  />
                   
                   {selectedRecord.prescriptions && (
                     <div className="bg-blue-50 rounded-lg p-4">

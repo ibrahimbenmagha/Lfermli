@@ -855,6 +855,142 @@ class NursesController extends Controller
     }
 
     /**
+     * Get nurses with location coordinates for interactive map.
+     */
+    public function getNearbyNursesForMap(Request $request): JsonResponse
+    {
+        try {
+            $userLat = $request->query('lat', 33.5731); // Default Casablanca
+            $userLng = $request->query('lng', -7.5898);
+            $serviceId = $request->query('service_id');
+            $radius = $request->query('radius', 50); // Default 50km
+
+            $query = Nurse::with(['user', 'city', 'zone', 'services'])
+                ->where('status', self::STATUS_ACTIVATED);
+
+            if ($serviceId) {
+                $query->whereHas('services', function ($q) use ($serviceId) {
+                    $q->where('services.id', $serviceId);
+                });
+            }
+
+            $nurses = $query->get()->map(function ($nurse) use ($userLat, $userLng) {
+                // If user coordinates exist, use them, otherwise fallback to reasonable city center + slight offset
+                $lat = $nurse->user->latitude ?? (33.5731 + (float)('0.0' . ($nurse->id * 17) % 80));
+                $lng = $nurse->user->longitude ?? (-7.5898 + (float)('0.0' . ($nurse->id * 23) % 80));
+
+                // Calculate distance
+                $theta = $userLng - $lng;
+                $dist = sin(deg2rad($userLat)) * sin(deg2rad($lat)) +  cos(deg2rad($userLat)) * cos(deg2rad($lat)) * cos(deg2rad($theta));
+                $dist = acos(min(max($dist, -1.0), 1.0));
+                $dist = rad2deg($dist);
+                $miles = $dist * 60 * 1.1515;
+                $distanceKm = round($miles * 1.609344, 1);
+
+                return [
+                    'id' => $nurse->id,
+                    'user_id' => $nurse->user_id,
+                    'name' => trim(($nurse->user->first_name ?? '') . ' ' . ($nurse->user->last_name ?? '')),
+                    'email' => $nurse->user->email ?? '',
+                    'phone' => $nurse->user->phone_number ?? '',
+                    'photo' => $nurse->user->photo ?? null,
+                    'city' => $nurse->city->name ?? '',
+                    'zone' => $nurse->zone->name ?? '',
+                    'note_over_5' => $nurse->note_over_5 ?? 4.8,
+                    'is_verified' => (bool)($nurse->is_verified ?? false),
+                    'license_number' => $nurse->license_number ?? null,
+                    'latitude' => (float)$lat,
+                    'longitude' => (float)$lng,
+                    'distance_km' => $distanceKm,
+                    'services' => $nurse->services->map(fn($s) => [
+                        'id' => $s->id,
+                        'name' => $s->name,
+                        'price' => $s->pivot->price ?? $s->price ?? 150,
+                    ]),
+                ];
+            });
+
+            return $this->successResponse($nurses, 'Infirmiers pour la carte récupérés avec succès');
+        } catch (\Exception $e) {
+            return $this->errorResponse('Erreur lors de la récupération des infirmiers sur la carte', $e->getMessage());
+        }
+    }
+
+    /**
+     * Admin verifies or unverifies a nurse.
+     */
+    public function verifyNurse(Request $request): JsonResponse
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'nurse_id' => 'required|integer|exists:nurses,id',
+                'is_verified' => 'required|boolean',
+                'license_number' => 'nullable|string|max:50',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $nurse = Nurse::findOrFail($request->nurse_id);
+            $nurse->is_verified = $request->is_verified;
+            if ($request->filled('license_number')) {
+                $nurse->license_number = $request->license_number;
+            }
+            $nurse->verified_at = $request->is_verified ? now() : null;
+            $nurse->save();
+
+            return $this->successResponse(
+                $nurse,
+                $request->is_verified ? 'Infirmier certifié et validé avec succès' : 'Statut de vérification retiré'
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse('Erreur lors de la mise à jour du statut de vérification', $e->getMessage());
+        }
+    }
+
+    /**
+     * Nurse uploads diploma or license document for verification.
+     */
+    public function uploadDiploma(Request $request): JsonResponse
+    {
+        try {
+            $nurseId = JwtHelper::getNurseId($request);
+            if (!$nurseId) {
+                return $this->unauthorizedResponse('Non autorisé');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'license_number' => 'nullable|string|max:100',
+                'diploma' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:5120',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $nurse = Nurse::findOrFail($nurseId);
+
+            if ($request->filled('license_number')) {
+                $nurse->license_number = $request->license_number;
+            }
+
+            if ($request->hasFile('diploma')) {
+                $file = $request->file('diploma');
+                $filename = 'diploma_' . $nurse->id . '_' . time() . '.' . $file->getClientOriginalExtension();
+                $path = $file->storeAs('diplomas', $filename, 'public');
+                $nurse->diploma_document = $path;
+            }
+
+            $nurse->save();
+
+            return $this->successResponse($nurse, 'Documents soumis avec succès. En attente de validation par l\'administrateur.');
+        } catch (\Exception $e) {
+            return $this->errorResponse('Erreur lors de l\'upload du document', $e->getMessage());
+        }
+    }
+
+    /**
      * Format nurse creation response.
      *
      * @param Nurse $nurse

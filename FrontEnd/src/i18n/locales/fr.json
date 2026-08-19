@@ -1,0 +1,69 @@
+{
+  "nav": {
+    "home": "Accueil",
+    "services": "Services",
+    "nurses": "Trouver un infirmier",
+    "map": "Carte des infirmiers",
+    "about": "À propos",
+    "blog": "Blog",
+    "contact": "Contact",
+    "login": "Connexion",
+    "register": "Inscription",
+    "dashboard": "Tableau de bord",
+    "sos": "URGENCE SOS",
+    "logout": "Déconnexion"
+  },
+  "hero": {
+    "title_part1": "Soins infirmiers",
+    "title_part2": "à domicile de qualité",
+    "subtitle": "Connectez-vous avec des infirmiers qualifiés et certifiés pour recevoir des soins professionnels dans le confort de votre domicile, 24h/24 et 7j/7.",
+    "book_now": "Réserver maintenant",
+    "discover_services": "Découvrir nos services",
+    "urgent_help": "Besoin d'aide urgente ?"
+  },
+  "sos": {
+    "button": "SOS URGENCE",
+    "title": "Déclencheur d'Urgence SOS",
+    "description": "Ce bouton alerte immédiatement tous les infirmiers qualifiés situés à moins de 15 km de votre position GPS.",
+    "trigger_btn": "ALERTER LES INFIRMIERS PROCHES",
+    "in_progress": "Localisation et alerte en cours...",
+    "success_title": "Alerte envoyée !",
+    "success_desc": "infirmiers à proximité ont reçu votre position d'urgence.",
+    "status_waiting": "En attente de prise en charge...",
+    "status_accepted": "Un infirmier est en route vers votre domicile !",
+    "responder": "Infirmier intervenant :",
+    "phone": "Téléphone :",
+    "cancel": "Fermer"
+  },
+  "map": {
+    "title": "Infirmiers Disponibles à Proximité",
+    "subtitle": "Visualisez en temps réel les praticiens disponibles autour de vous.",
+    "radius": "Rayon de recherche",
+    "filter_service": "Tous les soins",
+    "verified_only": "Infirmiers certifiés uniquement",
+    "my_location": "Ma position",
+    "distance": "à {{dist}} km",
+    "book": "Prendre RDV",
+    "view_profile": "Voir le profil"
+  },
+  "vitals": {
+    "title": "Suivi des Constantes Vitales",
+    "subtitle": "Historique clinique et paramètres vitaux enregistrés lors des soins.",
+    "blood_pressure": "Tension Artérielle",
+    "heart_rate": "Fréquence Cardiaque",
+    "blood_sugar": "Glycémie",
+    "temperature": "Température",
+    "spO2": "Saturation O₂",
+    "add_vitals": "Enregistrer les constantes",
+    "save": "Sauvegarder les mesures",
+    "normal": "Normal",
+    "attention": "À surveiller",
+    "history": "Évolution graphique"
+  },
+  "verification": {
+    "badge": "Vérifié & Certifié",
+    "verified_tooltip": "Diplôme d'État et carte professionnelle validés par l'administration Lfermli.",
+    "pending": "Vérification en cours",
+    "unverified": "Profil standard"
+  }
+}

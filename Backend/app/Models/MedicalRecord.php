@@ -14,6 +14,11 @@ class MedicalRecord extends Model
         'prescriptions',
         'resultats_tests',
         'notes_infirmier',
+        'blood_pressure',
+        'heart_rate',
+        'blood_sugar',
+        'temperature',
+        'oxygen_saturation',
     ];
 
     /**

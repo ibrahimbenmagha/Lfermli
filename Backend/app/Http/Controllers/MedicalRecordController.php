@@ -43,6 +43,11 @@ class MedicalRecordController extends Controller
                 'prescriptions' => 'nullable|string|max:2000',
                 'resultats_tests' => 'nullable|string|max:2000',
                 'notes_infirmier' => 'nullable|string|max:3000',
+                'blood_pressure' => 'nullable|string|max:20',
+                'heart_rate' => 'nullable|integer|min:30|max:250',
+                'blood_sugar' => 'nullable|numeric|min:0.1|max:10.0',
+                'temperature' => 'nullable|numeric|min:30.0|max:45.0',
+                'oxygen_saturation' => 'nullable|integer|min:50|max:100',
             ]);
 
             if ($validator->fails()) {
@@ -76,6 +81,11 @@ class MedicalRecordController extends Controller
                     'prescriptions' => $request->input('prescriptions') ?? $existingRecord->prescriptions,
                     'resultats_tests' => $request->input('resultats_tests') ?? $existingRecord->resultats_tests,
                     'notes_infirmier' => $request->input('notes_infirmier') ?? $existingRecord->notes_infirmier,
+                    'blood_pressure' => $request->input('blood_pressure') ?? $existingRecord->blood_pressure,
+                    'heart_rate' => $request->input('heart_rate') ?? $existingRecord->heart_rate,
+                    'blood_sugar' => $request->input('blood_sugar') ?? $existingRecord->blood_sugar,
+                    'temperature' => $request->input('temperature') ?? $existingRecord->temperature,
+                    'oxygen_saturation' => $request->input('oxygen_saturation') ?? $existingRecord->oxygen_saturation,
                 ]);
 
                 return $this->successResponse(
@@ -90,6 +100,11 @@ class MedicalRecordController extends Controller
                 'prescriptions' => $request->input('prescriptions'),
                 'resultats_tests' => $request->input('resultats_tests'),
                 'notes_infirmier' => $request->input('notes_infirmier'),
+                'blood_pressure' => $request->input('blood_pressure'),
+                'heart_rate' => $request->input('heart_rate'),
+                'blood_sugar' => $request->input('blood_sugar'),
+                'temperature' => $request->input('temperature'),
+                'oxygen_saturation' => $request->input('oxygen_saturation'),
             ]);
 
             return $this->successResponse(
@@ -219,6 +234,11 @@ class MedicalRecordController extends Controller
             'prescriptions' => $record->prescriptions,
             'resultats_tests' => $record->resultats_tests,
             'notes_infirmier' => $record->notes_infirmier,
+            'blood_pressure' => $record->blood_pressure,
+            'heart_rate' => $record->heart_rate,
+            'blood_sugar' => $record->blood_sugar,
+            'temperature' => $record->temperature,
+            'oxygen_saturation' => $record->oxygen_saturation,
             'created_at' => $record->created_at->format('Y-m-d H:i:s'),
             'updated_at' => $record->updated_at->format('Y-m-d H:i:s'),
         ];
@@ -235,10 +255,15 @@ class MedicalRecordController extends Controller
         return [
             'id' => $record->id,
             'appointment_id' => $record->appointment_id,
-            'appointment_date' => $record->appointment->apointementsDate->format('Y-m-d H:i:s'),
+            'appointment_date' => $record->appointment->apointementsDate ? $record->appointment->apointementsDate->format('Y-m-d H:i:s') : null,
             'prescriptions' => $record->prescriptions,
             'resultats_tests' => $record->resultats_tests,
             'notes_infirmier' => $record->notes_infirmier,
+            'blood_pressure' => $record->blood_pressure,
+            'heart_rate' => $record->heart_rate,
+            'blood_sugar' => $record->blood_sugar,
+            'temperature' => $record->temperature,
+            'oxygen_saturation' => $record->oxygen_saturation,
             'created_at' => $record->created_at->format('Y-m-d H:i:s'),
             'updated_at' => $record->updated_at->format('Y-m-d H:i:s'),
         ];
@@ -255,7 +280,7 @@ class MedicalRecordController extends Controller
         return [
             'id' => $record->id,
             'appointment_id' => $record->appointment_id,
-            'appointment_date' => $record->appointment->apointementsDate->format('Y-m-d H:i:s'),
+            'appointment_date' => $record->appointment->apointementsDate ? $record->appointment->apointementsDate->format('Y-m-d H:i:s') : null,
             'service_name' => $record->appointment->serviceNurse->service->name ?? null,
             'nurse_name' => trim(
                 ($record->appointment->serviceNurse->nurse->user->first_name ?? '') . ' ' . 
@@ -264,6 +289,11 @@ class MedicalRecordController extends Controller
             'prescriptions' => $record->prescriptions,
             'resultats_tests' => $record->resultats_tests,
             'notes_infirmier' => $record->notes_infirmier,
+            'blood_pressure' => $record->blood_pressure,
+            'heart_rate' => $record->heart_rate,
+            'blood_sugar' => $record->blood_sugar,
+            'temperature' => $record->temperature,
+            'oxygen_saturation' => $record->oxygen_saturation,
             'created_at' => $record->created_at->format('Y-m-d H:i:s'),
         ];
     }

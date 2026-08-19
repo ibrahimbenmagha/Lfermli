@@ -22,7 +22,6 @@ import NotFound from "./pages/NotFound";
 import NursesList from "./pages/NursesList";
 import UpcomingAppointmentsPage from "./pages/patient/UpcomingAppointmentsPage";
 import ScheduleManagement from "./pages/nurse/ScheduleManagement";
-import patients from "./pages/admin/patients";
 import NurseProfile from "./pages/nurse/NurseProfile";
 import GPatients from "./pages/admin/patients";
 import { AuthRoute, NurseRoute, PatientRoute, AdminRoute } from "./components/AuthRoutes";

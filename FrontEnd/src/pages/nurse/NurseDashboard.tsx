@@ -6,6 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import axiosInstance from '../../axiosConfig';
 import { toast } from '@/hooks/use-toast';
 import { AxiosError } from 'axios';
+import SOSNurseWatcher from '@/components/SOSNurseWatcher';
+import LanguageSelector from '@/components/LanguageSelector';
 
 interface NurseData {
   first_name: string;
@@ -204,6 +206,9 @@ const NurseDashboard: React.FC = () => {
       </header>
 
       <div className="container mx-auto px-4 py-8">
+        {/* Live SOS Emergency Alerts Watcher */}
+        <SOSNurseWatcher />
+
         {/* Welcome Section */}
         <div className="bg-gradient-medical text-white rounded-lg p-6 mb-8">
           <h2 className="text-3xl font-bold mb-2">
