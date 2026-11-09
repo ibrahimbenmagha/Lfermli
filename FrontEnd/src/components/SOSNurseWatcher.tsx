@@ -31,7 +31,7 @@ export const SOSNurseWatcher: React.FC = () => {
 
   const fetchActiveAlerts = async () => {
     try {
-      const response = await axios.get('/api/sos/alerts');
+      const response = await axios.get('/sos/alerts');
       const data = response.data?.data || [];
       setAlerts(data);
     } catch (err) {
@@ -41,15 +41,15 @@ export const SOSNurseWatcher: React.FC = () => {
 
   useEffect(() => {
     fetchActiveAlerts();
-    // Poll every 12 seconds for active SOS alerts
-    const interval = setInterval(fetchActiveAlerts, 12000);
+    // Poll every 6 seconds for active SOS alerts
+    const interval = setInterval(fetchActiveAlerts, 6000);
     return () => clearInterval(interval);
   }, []);
 
   const handleAcceptAlert = async (alertId: number) => {
     setLoading(true);
     try {
-      await axios.post(`/api/sos/accept/${alertId}`);
+      await axios.post(`/sos/accept/${alertId}`);
       toast.success('Vous avez pris en charge cette urgence ! Le patient est notifié.');
       fetchActiveAlerts();
     } catch (err: any) {
@@ -62,7 +62,7 @@ export const SOSNurseWatcher: React.FC = () => {
   const handleResolveAlert = async (alertId: number) => {
     setLoading(true);
     try {
-      await axios.post(`/api/sos/resolve/${alertId}`);
+      await axios.post(`/sos/resolve/${alertId}`);
       toast.success('Urgence clôturée avec succès.');
       fetchActiveAlerts();
     } catch (err: any) {

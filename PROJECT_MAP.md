@@ -218,7 +218,9 @@ Emplacement racine : `FrontEnd/src/`
 - `AuthRoutes.tsx` : Gardes de navigation React Router (`PatientRoute`, `NurseRoute`, `AdminRoute`, `AuthRoute`).
 
 ### 3. Client HTTP & Configuration API
-- `src/axiosConfig.ts` : Instance Axios centralisée pointant sur `http://127.0.0.1:8000/api` avec `withCredentials: true` pour la transmission automatique des cookies d'authentification.
+- `src/axiosConfig.ts` : Instance Axios centralisée pointant dynamiquement sur `import.meta.env.VITE_API_BASE_URL` (défaut : `http://127.0.0.1:8000/api`) avec `withCredentials: true` et intercepteur automatique anti-dédoublement `/api/`.
+- `FrontEnd/.env` & `.env.example` : Configuration locale des variables d'environnement (URL API, clé publique Stripe).
+- `src/App.tsx` : Optimisé avec Code Splitting (`React.lazy` et `Suspense`) pour charger les modules Admin, Patient et Soignant à la demande.
 
 ---
 

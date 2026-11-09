@@ -47,7 +47,7 @@ export const SOSButtonModal: React.FC<{ variant?: 'header' | 'hero' | 'floating'
 
   const sendSOSRequest = async (lat: number, lng: number) => {
     try {
-      const response = await axios.post('/api/sos/trigger', {
+      const response = await axios.post('/sos/trigger', {
         latitude: lat,
         longitude: lng,
         notes: emergencyNotes || "Urgence médicale immédiate à domicile",

@@ -1,28 +1,18 @@
 <?php
 
-
 namespace App\Helpers;
 
 use Illuminate\Http\Request;
+use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Exceptions\JWTException;
 
 class JWTHelper
-
 {
-    private static function parseToken($token)
-    {
-        $tokenParts = explode('.', $token);
-        if (count($tokenParts) != 3) {
-            return null;
-        }
-        $payload = base64_decode(str_replace(
-            ['-', '_'],
-            ['+', '/'],
-            $tokenParts[1]
-        ));
-        return json_decode($payload, true);
-    }
-
-    public static function getTokenUserData(Request $request)
+    /**
+     * Get validated user payload data from the JWT token.
+     * Cryptographically validates HMAC signature, claims, and expiration.
+     */
+    public static function getTokenUserData(?Request $request = null)
     {
         try {
             if ($request === null) {
@@ -33,13 +23,25 @@ class JWTHelper
             if (!$token) {
                 return null;
             }
-            return self::parseToken($token);
+
+            try {
+                // Cryptographically verify token signature and validity
+                if (auth('api')->setToken($token)->check()) {
+                    $payload = auth('api')->setToken($token)->getPayload();
+                    return $payload ? $payload->toArray() : null;
+                }
+            } catch (JWTException $e) {
+                // Invalid signature, expired, or malformed
+                return null;
+            }
+
+            return null;
         } catch (\Exception $e) {
             return null;
         }
     }
 
-    public static function getNurseId(Request $request)
+    public static function getNurseId(?Request $request = null)
     {
         try {
             $userData = self::getTokenUserData($request);
@@ -49,8 +51,7 @@ class JWTHelper
         }
     }
 
-
-    public static function getNuersFirst_name(Request $request)
+    public static function getNuersFirst_name(?Request $request = null)
     {
         try {
             $userData = self::getTokenUserData($request);
@@ -59,7 +60,8 @@ class JWTHelper
             return null;
         }
     }
-    public static function getUserId(Request $request)
+
+    public static function getUserId(?Request $request = null)
     {
         try {
             $userData = self::getTokenUserData($request);
@@ -68,7 +70,8 @@ class JWTHelper
             return null;
         }
     }
-    public static function getUserRole(Request $request)
+
+    public static function getUserRole(?Request $request = null)
     {
         try {
             $userData = self::getTokenUserData($request);
@@ -78,7 +81,7 @@ class JWTHelper
         }
     }
 
-    public static function getPatientId(Request $request)
+    public static function getPatientId(?Request $request = null)
     {
         try {
             $userData = self::getTokenUserData($request);
@@ -87,34 +90,26 @@ class JWTHelper
             return null;
         }
     }
-    public static function expireToken(Request $request)
+
+    public static function expireToken(?Request $request = null)
     {
         try {
             if ($request === null) {
                 $request = request();
             }
-    
+
             $token = $request->cookie('access_token') ?? $request->bearerToken();
-    
+
             if (!$token) {
                 return response()->json(['error' => 'Token not found'], 400);
             }
-    
-            $payloadData = self::parseToken($token);
-    
-            if ($payloadData === null) {
-                return response()->json(['error' => 'Invalid token format'], 400);
-            }
-    
-            // Modification importante: invalider le token au lieu de le rafraîchir
+
             try {
-                auth()->setToken($token)->invalidate(true);
+                auth('api')->setToken($token)->invalidate(true);
             } catch (\Exception $e) {
-                // Si l'invalidation échoue, on continue quand même
-                // car nous allons supprimer le cookie client de toute façon
+                // Continue to allow cookie clearing even if already expired
             }
-    
-            // Ne pas renvoyer de réponse ici, mais laisser logout() s'en charger
+
             return true;
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to expire token: ' . $e->getMessage()], 500);

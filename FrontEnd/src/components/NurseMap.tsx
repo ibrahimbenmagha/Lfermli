@@ -47,7 +47,7 @@ export const NurseMap: React.FC<{ initialCity?: string; selectedServiceId?: numb
       const params: any = { lat, lng };
       if (selectedServiceId) params.service_id = selectedServiceId;
 
-      const response = await axios.get('/api/auth/getNearbyNursesForMap', { params });
+      const response = await axios.get('/auth/getNearbyNursesForMap', { params });
       if (response.data?.success) {
         setNurses(response.data.data);
       }

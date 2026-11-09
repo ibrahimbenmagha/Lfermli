@@ -3,6 +3,7 @@ import { useStripe, useElements, CardElement } from '@stripe/react-stripe-js';
 import { Button } from './ui/button';
 import { toast } from '@/hooks/use-toast';
 import { CheckCircle, Loader2 } from 'lucide-react';
+import axiosInstance from '@/axiosConfig';
 
 interface StripePaymentFormProps {
   clientSecret: string;
@@ -45,6 +46,15 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ clientSecret, app
       });
       setLoading(false);
     } else if (paymentIntent.status === 'succeeded') {
+      try {
+        await axiosInstance.post('stripe-webhook', {
+          appointment_id: appointmentId,
+          payment_intent_id: paymentIntent.id,
+        });
+      } catch (confirmError) {
+        console.warn("Notification de paiement au backend:", confirmError);
+      }
+
       toast({
         title: "Paiement réussi",
         description: "Votre paiement a été traité avec succès.",
